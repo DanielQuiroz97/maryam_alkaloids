@@ -1,0 +1,296 @@
+---
+title: "Tomato leaves extracts alkaloid profile"
+author: "Daniel Quiroz / Cooperstone Lab"
+output:
+  github_document:
+    toc: true
+    toc_depth: 4
+    number_sections: true
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    toc_float: true
+    theme: flatly
+    code_download: true
+---
+
+# What we did
+
+## 1:1 MeOH:H2O water dilution  
+Maryam sent samples in 70% methanol, so Daniel diluted them with water 
+to be 50% methanol (and 50% water) as that is what we typically analyze
+samples in.  He diluted, spun at 21,130 x g for 2 min to pellet any 
+insoluble material, and transferred to an LC vial.
+
+## Prepare standars
+
+We also prepared standards for alpha-tomatine 100 ul in 2ml of 
+the stock solution (which has dehydrotomatine 
+as a contaminant), and tomatidine (which has dehydrotomatidine
+as a contaminant). In this situation the contamination is good 
+because we get to confirm the presence (or absence) of two more alklaoids.
+
+## Data acquisition
+
+Samples were run on an Agilent 1290 LC interfaced with a 6546 QTOF-MS 
+using electrospray ionization and positive ionization mode. 
+Separation and MS conditions were the same as in Dzakovich et al.
+
+
+# Results
+
+
+
+
+* Tutorial about chromatogram plotting 
+[here](https://lgatto.github.io/MSnbase/reference/chromatogram-MSnExp-method.html)
+
+```bash
+module load R/4.2.0-gnu9.1
+```
+
+## Libraries
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Required libraries
+library(MSnbase)
+library(tidyverse)
+library(Rdisop)
+library(usethis)
+library(readxl)
+library(purrr)
+library(plotly)
+
+# Utils with core functions
+source("utils.R")
+```
+
+
+```{r import_data, cache=TRUE, eval=TRUE, include=FALSE}
+mzXML_files <- list.files(pattern = "*.mzXML", path = "./mzXML/", 
+                          full.names = T)
+  
+ms1_data <- readMSData(files = mzXML_files, msLevel. = 1, verbose = F,
+                       centroided. = T, mode = "onDisk")
+```
+
+
+```{r eval=TRUE, include=FALSE}
+alkaloids <- read_xlsx('./Data/Alkaloids.xlsx', sheet = 1)
+alkaloids
+```
+
+```{r eval=TRUE, include=FALSE}
+alkaloids_short <- alkaloids %>% group_by(Formula) %>% 
+  summarize(Alkaloids = str_c(Compound, collapse = "_"))
+```
+
+
+Now, we can calculate the monoisotopic mass and the ranges with a given ppm.
+
+```{r eval=TRUE, include=FALSE}
+# Tm = Theoretical mass
+# ppm = error 
+# range = range of +- ppm
+get_ppm <- function(Tm, ppm = 10) {
+  Mm = ( ppm * Tm / 1E6) + Tm
+  range = abs(Tm-Mm)
+  range
+}
+```
+
+
+This is the list of the alkaloids with the masses in POS of the analyzed analyties in 
+[Dzakovich et al.](https://www.frontiersin.org/articles/10.3389/fpls.2020.00767/full?&utm_source=Email_to_authors_&utm_medium=Email&utm_content=T1_11.5e1_author&utm_campaign=Email_publication&field=&journalName=Frontiers_in_Plant_Science&id=523863)
+
+```{r eval=TRUE}
+alkaloids_short$Monoisotopic <- sapply(alkaloids_short$Formula, 
+                                       function(x) getMolecule(x)$exactmass)
+alkaloids_short <- alkaloids_short %>% 
+  mutate(mz_pos = Monoisotopic + 1.007) %>% 
+  mutate(Upper_limit = mz_pos + get_ppm(mz_pos, ppm = 10),
+         Lower_limit = mz_pos - get_ppm(mz_pos, ppm = 10) )
+alkaloids_short
+```
+
+
+## Samples are concentrated enough
+
+The samples are plenty concentrated enough, we injected 0.1 ul (the minimum we can)
+and were nearly saturating signal on our MS. This is good because we can always dilute if
+necessary (but concentrating is much harder).
+
+## Alpha-tomatine and dehydromatidine in your samples
+
+We can confirm by comparing with authentic standard that there is alpha-tomatine and tomatidine in your samples
+
+
+### Alpha-tomatine (C50H83NO21) rt = 5.4
+
+```{r cache=TRUE, eval=TRUE, include=TRUE}
+aTomatine <- get_EIC_tbb(msn_exp = ms1_data, mz = c(1034.5424, 1034.5631), ID = "C50H83NO21")
+```
+
+
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE, paged.print=FALSE}
+aTomatine_plot <- ggplot(aTomatine, aes(rt/60, Intensity, col = Sample_ID)) +
+  geom_line() + facet_wrap("Sample_ID", ncol = 1, scales = "free_y") + guides(color = "none") + 
+  theme_bw() + 
+  labs(title = "Alpha-tomatine EIC ([M+H]+ = 1034.5528)",
+       subtitle = "C50H83NO21: Alpha-tomatine\nExpected retention time (rt): 5.4",
+       x = "rt (min)") +
+  geom_vline(xintercept = 5.35, alpha =0.6, linetype = "dashed")
+aTomatine_plot
+```
+
+**Interactive plots** 
+
+```{r echo=FALSE, fig.height=8, fig.width=8}
+line_specs <- list(width = 1.3)
+
+AT_std <- aTomatine %>% dplyr::filter(Sample_ID == "aT_tomatidine_std_0pt1ul_4.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "Standard", type = "scatter", mode = "lines", line = line_specs)
+
+AT_SC22 <- aTomatine %>% dplyr::filter(Sample_ID == "SC22_1_0pt1ul_3.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SC22", type = "scatter", mode = "lines",  line = line_specs)
+
+
+AT_SCR02 <- aTomatine %>% dplyr::filter(Sample_ID == "SCR02_1_0pt1ul_2.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SCR02", type = "scatter", mode = "lines",  line = line_specs)
+
+subplot(AT_std, AT_SC22, AT_SCR02, nrows = 3, shareX = T) %>% 
+  layout(title = list(text = "Alpha-Tomatine chromatograms (rt: 5.4)")) 
+```
+
+
+
+### Dehydrotomatine (Dehydrotomatine) rt = 5.2
+
+
+```{r cache=TRUE, eval=TRUE, include=TRUE}
+DOHtine <- get_EIC_tbb(msn_exp = ms1_data, mz = c(1032.5268, 1032.5474), ID = "C50H81NO21")
+```
+
+
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE, paged.print=FALSE}
+DOHtine_plot <- ggplot(DOHtine, aes(rt/60, Intensity, col = Sample_ID)) +
+  geom_line() + facet_wrap("Sample_ID", ncol = 1, scales = "free_y") + guides(color = "none") + 
+  theme_bw() + 
+  labs(title = "Dehydrotomatine EIC ([M+H]+ = 1032.5)",
+       subtitle = "C50H81NO21: Dehydrotomatine\nExpected retention time (rt): 5.2",
+       x = "rt (min)") +
+  geom_vline(xintercept = 5.2, alpha = 0.3, linetype = "dashed")
+DOHtine_plot
+```
+
+**Interactive Plots**
+
+
+```{r echo=FALSE, fig.height=8, fig.width=8}
+DOHtine_std <- DOHtine %>% dplyr::filter(Sample_ID == "aT_tomatidine_std_0pt1ul_4.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "Standard", type = "scatter", mode = "lines", line = line_specs)
+
+DOHtine_SC22 <- DOHtine %>% dplyr::filter(Sample_ID == "SC22_1_0pt1ul_3.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SC22", type = "scatter", mode = "lines",  line = line_specs)
+
+
+DOHtine_SCR02 <- DOHtine %>% dplyr::filter(Sample_ID == "SCR02_1_0pt1ul_2.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SCR02", type = "scatter", mode = "lines",  line = line_specs)
+
+subplot(DOHtine_std, DOHtine_SC22, DOHtine_SCR02, nrows = 3, shareX = T) %>% 
+  layout(title = list(text = "Alpha-Tomatine chromatograms (rt: 5.2)")) 
+```
+
+
+## We do not see Tomatidine or Dehydrotomatidine
+
+### Tomatidine (C27H45NO2) rt = 7
+
+```{r cache=TRUE, eval=TRUE, include=TRUE}
+tomatidine <- get_EIC_tbb(msn_exp = ms1_data, mz = c(416.3562, 416.3479), ID = "C27H45NO2")
+```
+
+
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE, paged.print=FALSE}
+tomatidine_plot <- ggplot(tomatidine, aes(rt/60, Intensity, col = Sample_ID)) +
+  geom_line() + facet_wrap("Sample_ID", ncol = 1, scales = "free_y") + guides(color = "none") + 
+  theme_bw() + 
+  labs(title = "Tomatidine EIC ([M+H]+ = 416.4)",
+       subtitle = "C27H45NO2: Tomatidine\nExpected retention time (rt): 7.0",
+       x = "rt (min)") +
+  geom_vline(xintercept = 6.9, alpha = 0.3, linetype = "dashed")
+tomatidine_plot
+```
+
+**Interactive Plots**
+
+```{r echo=FALSE, fig.height=8, fig.width=8}
+TO_std <- tomatidine %>% dplyr::filter(Sample_ID == "aT_tomatidine_std_0pt1ul_4.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "Standard", type = "scatter", mode = "lines",  line = line_specs)
+
+TO_SC22 <- tomatidine %>% dplyr::filter(Sample_ID == "SC22_1_0pt1ul_3.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SC22", type = "scatter", mode = "lines",  line = line_specs)
+
+
+TO_SCR02 <- tomatidine %>% dplyr::filter(Sample_ID == "SCR02_1_0pt1ul_2.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SCR02", type = "scatter", mode = "lines",  line = line_specs)
+
+subplot(TO_std, TO_SC22, TO_SCR02, nrows = 3, shareX = T) %>% 
+  layout(title = list(text = "Tomatidine chromatograms (rt = 7)")) 
+```
+
+
+
+
+### Dehydrotomatidine (C27H43NO2) rt: 7.3
+
+
+```{r cache=TRUE, eval=TRUE, include=TRUE}
+DOHdine <- get_EIC_tbb(msn_exp = ms1_data, mz = c(414.3322, 414.3405), ID = "C27H43NO2")
+```
+
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE, paged.print=FALSE}
+DOHdine_plot <- ggplot(DOHdine, aes(rt/60, Intensity, col = Sample_ID)) +
+  geom_line() + facet_wrap("Sample_ID", ncol = 1, scales = "free_y") + guides(color = "none") + 
+  theme_bw() + 
+  labs(title = "Dehydrotomatidine EIC ([M+H]+ = 414.3)",
+       subtitle = "C27H43NO2: Dehydrotomatidine\nExpected retention time (rt): 7.3",
+       x = "rt (min)") +
+  geom_vline(xintercept = 7.3, alpha = 0.3, linetype = "dashed")
+DOHdine_plot
+```
+
+**Interactive Plots**
+
+
+```{r echo=FALSE, fig.height=8, fig.width=8}
+DOHdine_std <- DOHdine %>% dplyr::filter(Sample_ID == "aT_tomatidine_std_0pt1ul_4.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "Standard", type = "scatter", mode = "lines", line = line_specs)
+
+DOHdine_SC22 <- DOHdine %>% dplyr::filter(Sample_ID == "SC22_1_0pt1ul_3.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SC22", type = "scatter", mode = "lines",  line = line_specs)
+
+
+DOHdine_SCR02 <- DOHdine %>% dplyr::filter(Sample_ID == "SCR02_1_0pt1ul_2.mzXML") %>% 
+  plot_ly(x = ~rt/60, y = ~Intensity, name = "SCR02", type = "scatter", mode = "lines",  line = line_specs)
+
+subplot(DOHdine_std, DOHdine_SC22, DOHdine_SCR02, nrows = 3, shareX = T) %>% 
+  layout(title = list(text = "Dehydrotomatidine chromatograms (rt: 7.3)")) 
+```
+
+# Usefull links
+* msnBase chromatogram plotting [link](https://lgatto.github.io/MSnbase/articles/v03-MSnbase-centroiding.html)
+
+
+# Session info
+
+```{r}
+sessionInfo()
+```
+
